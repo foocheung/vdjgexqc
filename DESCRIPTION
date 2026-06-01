@@ -1,0 +1,27 @@
+Package: vdjgexqc
+Title: VDJ to GEX QC Dashboard
+Version: 0.0.1
+Authors@R: 
+    person("Foo", "Cheung", email = "foocheung.nih@gmail.com", role = c("aut", "cre"))
+Description: A golem Shiny application for BCR VDJ to GEX barcode matching, BCR QC, clonotype summaries, V/J usage, barcode loss tracking, and Sankey visualization.
+License: MIT + file LICENSE
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.2
+Imports:
+    config,
+    shiny,
+    golem,
+    dplyr,
+    readr,
+    purrr,
+    stringr,
+    tibble,
+    DT,
+    networkD3,
+    htmlwidgets,
+    Seurat,
+    ggplot2,
+    plotly
+Depends:
+    R (>= 4.1.0)
