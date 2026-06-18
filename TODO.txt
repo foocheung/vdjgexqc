@@ -1,1 +1,5 @@
 
+Allow to view sankey with a drop down
+see how the split of sankey by each VJC contig uploaded file
+and also subject
+create a new sankey for each
