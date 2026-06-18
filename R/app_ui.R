@@ -44,11 +44,8 @@ app_ui <- function(request) {
             condition = "input.run_cite == true",
             textInput("adt_assay", "ADT assay name", value = "ADT"),
             
-            # Control antigen picker (HSA) — dynamic
             uiOutput("cite_hsa_picker"),
             tags$br(),
-            
-            # Viral antigen picker — dynamic
             uiOutput("cite_antigen_picker"),
             tags$br(),
             
@@ -131,6 +128,18 @@ app_ui <- function(request) {
                 condition = "input.run_cite == true",
                 tabsetPanel(
                   
+                  # CITE Sankey ────────────────────────────────────────────
+                  tabPanel(
+                    "CITE Sankey",
+                    br(),
+                    tags$p(
+                      "Cell-level flow from total GEX cells through sort lanes, ",
+                      "antigen-specificity threshold, and (when multiple antigens ",
+                      "are selected) cross-reactivity tiers."
+                    ),
+                    networkD3::sankeyNetworkOutput("cite_sankey", height = "600px")
+                  ),
+                  
                   # Fig 1 ─────────────────────────────────────────────────
                   tabPanel(
                     "Fig 1 \u2014 Subject cell counts",
@@ -189,7 +198,7 @@ app_ui <- function(request) {
                     plotly::plotlyOutput("fig_clonotype_lollipop", height = "700px")
                   ),
                   
-                  # CITE QC sub-tabs ───────────────────────────────────────
+                  # CITE QC ────────────────────────────────────────────────
                   tabPanel(
                     "CITE QC",
                     br(),

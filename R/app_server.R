@@ -68,7 +68,12 @@ app_server <- function(input, output, session) {
       ),
       checkboxGroupInput("cite_selected_antigens", label = NULL,
                          choices  = info$antigen_features,
-                         selected = info$antigen_features)
+                         selected = {
+                           dv <- grep("DV[1-4]|DV_[1-4]|dengue.?[1-4]|serotype.?[1-4]",
+                                      info$antigen_features,
+                                      value = TRUE, ignore.case = TRUE)
+                           if (length(dv) > 0) dv else info$antigen_features
+                         })
     )
   })
   
@@ -131,8 +136,29 @@ app_server <- function(input, output, session) {
         suffix_regex  = input$suffix_regex
       )
       
+      # ── Derive ag-pos config(s) from uploaded VDJ file names ────────────────
+      # Parse config numbers from every uploaded filename, then identify which
+      # correspond to the ag-pos sort lane.  The app UI lets the user specify
+      # the ag-pos sort value; we match that against the condition column to
+      # find the right config(s).  As a reliable fallback we also expose the
+      # parsed config numbers so the server can pass them directly.
+      all_file_configs <- purrr::map_chr(input$vdj_files$name, parse_config_from_file)
+      ag_pos_configs <- derive_ag_pos_configs(
+        vdj_list         = vdj_list,
+        file_names       = input$vdj_files$name,
+        all_file_configs = all_file_configs,
+        ag_pos_value     = input$ag_pos_value,
+        seurat_filt      = seurat_filt,
+        condition_col    = input$condition_col
+      )
+      
       incProgress(0.85)
-      sankey <- make_sankey(tables$flow_summary)
+      sankey <- make_sankey(
+        flow_summary    = tables$flow_summary,
+        bcr_annotated   = vdj_list$bcr_annotated,
+        filtered_lookup = tables$filtered_lookup,
+        ag_pos_configs  = ag_pos_configs
+      )
       plots  <- make_plots(tables)
       incProgress(1)
       
@@ -141,7 +167,8 @@ app_server <- function(input, output, session) {
            vdj_list      = vdj_list,
            tables        = tables,
            sankey        = sankey,
-           plots         = plots)
+           plots         = plots,
+           ag_pos_configs = ag_pos_configs)
     })
   })
   
@@ -193,8 +220,28 @@ app_server <- function(input, output, session) {
     if (is.null(v) || v == "") NULL else v
   })
   
-  # ── Existing VDJ / GEX outputs ───────────────────────────────────────────────
+  # ── VDJ / GEX Sankey ────────────────────────────────────────────────────────
   output$sankey <- networkD3::renderSankeyNetwork({ req(results()); results()$sankey })
+  
+  # ── CITE antigen-filtering Sankey ────────────────────────────────────────────
+  output$cite_sankey <- networkD3::renderSankeyNetwork({
+    req(cite_results(), results())
+    tryCatch(
+      make_cite_sankey(
+        cite_results    = cite_results(),
+        bcr_annotated   = results()$vdj_list$bcr_annotated,
+        barcode_summary = results()$vdj_list$barcode_summary,
+        vdj_gex_match   = results()$tables$vdj_gex_match,
+        filtered_lookup = results()$tables$filtered_lookup,
+        ag_pos_configs  = results()$ag_pos_configs
+      ),
+      error = function(e) {
+        showNotification(paste("CITE Sankey error:", conditionMessage(e)),
+                         type = "error", duration = 10)
+        NULL
+      }
+    )
+  })
   
   output$flow_summary <- DT::renderDT({
     req(results())
@@ -279,9 +326,7 @@ app_server <- function(input, output, session) {
     plotly::ggplotly(p)
   })
   
-  # ── Figure outputs (new) ──────────────────────────────────────────────────────
-  
-  # Fig 1: Subject cell count table
+  # ── Figure outputs ────────────────────────────────────────────────────────────
   output$fig_subject_table <- DT::renderDT({
     req(results(), subj_col())
     tbl <- tryCatch(
@@ -292,7 +337,6 @@ app_server <- function(input, output, session) {
     DT::datatable(tbl, rownames = FALSE, options = list(pageLength = 20))
   })
   
-  # Fig 3: ADT dot plot
   output$fig_adt_dotplot <- plotly::renderPlotly({
     req(cite_results(), input$celltype_main_col)
     tryCatch(
@@ -306,7 +350,6 @@ app_server <- function(input, output, session) {
     )
   })
   
-  # Fig 4: B-cell abundance stacked bar
   output$fig_bcell_abundance <- plotly::renderPlotly({
     req(results(), subj_col(), input$celltype_fine_col)
     tryCatch(
@@ -320,7 +363,6 @@ app_server <- function(input, output, session) {
     )
   })
   
-  # Fig 5: Normalised cell-type heatmap
   output$fig_celltype_heatmap <- plotly::renderPlotly({
     req(results(), subj_col(), input$celltype_fine_col)
     tryCatch(
@@ -333,7 +375,6 @@ app_server <- function(input, output, session) {
     )
   })
   
-  # Fig 7: Antigen vs HSA scatter grid
   output$fig_ag_vs_hsa <- plotly::renderPlotly({
     req(cite_results(), subj_col())
     tryCatch(
@@ -348,7 +389,6 @@ app_server <- function(input, output, session) {
     )
   })
   
-  # Fig 8: B-cell by comparison group
   output$fig_bcell_by_group <- plotly::renderPlotly({
     req(cite_results(), subj_col(), input$celltype_fine_col)
     tryCatch(
@@ -361,7 +401,6 @@ app_server <- function(input, output, session) {
     )
   })
   
-  # Fig 9: Clonotype lollipop — subject selector populated dynamically
   output$clonotype_subject_ui <- renderUI({
     req(results())
     meta     <- results()$seurat_filt@meta.data
@@ -439,6 +478,13 @@ app_server <- function(input, output, session) {
       req(cite_results())
       tbl <- cite_results()$ag_subject_summary
       if (!is.null(tbl)) readr::write_csv(tbl, f)
+    }
+  )
+  output$download_annotated_seurat <- downloadHandler(
+    filename = function() "seurat_with_DV_calls.rds",
+    content  = function(f) {
+      req(cite_results())
+      saveRDS(cite_results()$seurat_obj, f)
     }
   )
   output$download_cite_crossreact <- downloadHandler(
